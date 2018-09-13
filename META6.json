@@ -1,0 +1,25 @@
+{
+  "api": "0",
+  "authors": [
+    "Samuel Thiriet <thisamu@hotmail.com>"
+  ],
+  "depends": [
+    
+  ],
+  "description": "Manage Ansible with a Rest API",
+  "license": "AGPL-3.0",
+  "meta-version": 0,
+  "name": "Ansible::RestApi",
+  "perl": "6.c",
+  "provides": {
+    
+  },
+  "resources": [
+    
+  ],
+  "source-url": "https://github.com/sthiriet/Ansible-RestAPI",
+  "tags": [
+    
+  ],
+  "version": "0.0.0"
+}
