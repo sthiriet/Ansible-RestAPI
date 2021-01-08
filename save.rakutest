@@ -1,0 +1,101 @@
+use Test;
+use Cro::HTTP::Router;
+use Cro::HTTP::Server;
+use Cro::Service;
+use Cro::HTTP::Client;
+use Cro::HTTP::Prometheus::Exporter;
+use Prometheus::Client :metrics, :instrument;
+use Cro::HTTP::Middleware;
+use OO::Monitors;
+
+monitor PrometheusClient {
+    has Str $.prefix is rw = "Cro";
+    #    has Str $.path is rw = "/metrics" ;
+    #    has RouteSet $.route is required;
+    #has Int $.count is rw = 0;
+
+    has $!histo = histogram(
+            name => 'http_request_duration_seconds',
+            documentation => 'Cro HTTP request duration in seconds',
+            label-values => <method, status>,
+                                         );
+    method update($duration, %labels) {
+        $!histo.labels(%labels).observe($duration);
+        #$!count++
+    }
+}
+
+role PrometheusTimer{
+    has Instant $.start_time = now ;
+}
+constant TEST_PORT = 31315;
+my $url = "http://localhost:{TEST_PORT}";
+
+# Application
+my $application = route {
+    get -> {
+        content 'text/html', "<strong>Hello from Cro!</strong>";
+    }
+
+    get -> 'echo' {
+        request-body -> $body {
+            content 'text/plain', "$body";
+        }
+    }
+
+    get -> 'index.shtml' {
+        content 'text/html', "Correct Answer";
+    }
+
+    get -> 'index.SHTML' {
+        content 'text/html', "Incorrect Answer";
+    }
+
+    my atomicint $i = 0;
+    get -> 'counter' {
+        content 'text/plain', (++⚛$i).Str;
+    }
+};
+
+
+subtest {
+    my class OverlySimpleCache does Cro::HTTP::Middleware::RequestResponse {
+        has PrometheusClient $.prom_client .= new;
+        method process-requests(Supply $requests) {
+            supply whenever $requests -> $request {
+                my $req = $request but PrometheusTimer;
+                emit $req;
+            }
+        }
+        method process-responses(Supply $responses) {
+            supply whenever $responses -> $response {
+                $!prom_client.update(now - $response.request.start_time, {});
+                say now - $response.request.start_time;
+                emit $response;
+            }
+        }
+    }
+    {
+        my $prom =OverlySimpleCache.new;
+        my Cro::Service $service = Cro::HTTP::Server.new(
+                :host('localhost'), :port(TEST_PORT), application => $application,
+                before => $prom
+                );
+        $service.start;
+        LEAVE $service.stop();
+
+        given await Cro::HTTP::Client.get("$url/counter") -> $resp {
+            is $resp.status, 200, 'Got 200 response on first request';
+            is $prom.prom_client.count, '1', 'prom 1 ok';
+            is await($resp.body-text), '1', 'Expected body';
+        }
+
+        given await Cro::HTTP::Client.get("$url/counter") -> $resp {
+            is $resp.status, 200, 'Got 200 response on second request';
+            is $prom.prom_client.count, '2', 'prom 2 ok';
+            is await($resp.body-text), '2', 'Expected body';
+        }
+    }
+}, 'Request/response middleware using Cro::HTTP::Middleware::RequestResponse';
+
+done-testing;
